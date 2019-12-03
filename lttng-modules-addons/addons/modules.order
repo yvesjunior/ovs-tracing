@@ -1,0 +1,7 @@
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-probe-addons.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-packet.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-ttwu.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-elv.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-vmsync-guest.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-vmsync-host.ko
+kernel//home/yves/Downloads/lttng-modules-addons/addons/lttng-ovs-upcall-end.ko

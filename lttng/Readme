@@ -1,0 +1,2 @@
+Lttng module addons to enable ovs_addons tracepoint
+#./lttng-modules/control-addons load

@@ -1,0 +1,4 @@
+addons_lttng_ovs_vport_receive (loglevel: TRACE_EMERG (0)) (type: tracepoint)
+addons_lttng_ovs_vport_send (loglevel: TRACE_EMERG (0)) (type: tracepoint)
+addons_lttng_ovs_upcall_end (loglevel: TRACE_EMERG (0)) (type: tracepoint)
+addons_lttng_ovs_upcall_start (loglevel: TRACE_EMERG (0)) (type: tracepoint)

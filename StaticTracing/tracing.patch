@@ -1,0 +1,177 @@
+diff -ruN old/ovs/datapath/datapath.c ovs/datapath/datapath.c
+--- old/ovs/datapath/datapath.c	2016-06-25 14:13:34.785501894 -0400
++++ ovs/datapath/datapath.c	2016-06-25 14:02:58.781514872 -0400
+@@ -61,6 +61,12 @@
+ #include "vport-internal_dev.h"
+ #include "vport-netdev.h"
+ 
++/*define this only once and before trace.h is included*/		
++#define CREATE_TRACE_POINTS		
++//#define "trace.h"		
++#include "trace.h"		
++
++
+ int ovs_net_id __read_mostly;
+ EXPORT_SYMBOL_GPL(ovs_net_id);
+ 
+@@ -317,6 +323,8 @@
+ 		err = -ENOTCONN;
+ 		goto err;
+ 	}
++	if (trace_upcall_start_enabled())		
++		trace_upcall_start(skb, tag_packet(skb));
+ 
+ 	if (!skb_is_gso(skb))
+ 		err = queue_userspace_packet(dp, skb, key, upcall_info, cutlen);
+@@ -618,6 +626,9 @@
+ 		packet->ignore_df = 1;
+ 	}
+ 	OVS_CB(packet)->mru = mru;
++	/* trace event*/
++	if (trace_upcall_end_enabled())		
++		trace_upcall_end(packet, report_packet(packet));
+ 
+ 	/* Build an sw_flow for sending this packet. */
+ 	flow = ovs_flow_alloc();
+diff -ruN old/ovs/datapath/Makefile.am ovs/datapath/Makefile.am
+--- old/ovs/datapath/Makefile.am	2016-06-25 14:13:34.781501894 -0400
++++ ovs/datapath/Makefile.am	2016-06-25 13:56:40.533522590 -0400
+@@ -11,6 +11,9 @@
+ include Modules.mk
+ include linux/Modules.mk
+ 
++#for trace_event macro
++CFLAGS_datapath.o = -I$(src)
++
+ # The following is based on commands for the Automake "distdir" target.
+ distfiles: Makefile
+ 	@srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
+diff -ruN old/ovs/datapath/trace.h ovs/datapath/trace.h
+--- old/ovs/datapath/trace.h	1969-12-31 19:00:00.000000000 -0500
++++ ovs/datapath/trace.h	2016-06-25 13:55:22.301524187 -0400
+@@ -0,0 +1,106 @@
++/* Written by Mick Tarsel */
++
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM openvswitch
++
++#if !defined(_TRACE_H) || defined(TRACE_HEADER_MULTI_READ)
++
++#include <linux/tracepoint.h>
++
++#if !defined(_TRACE_H_)
++
++struct packet_tag {
++	char eyeCatch;
++	unsigned long reqid;
++};
++
++#define TAGGED 0x69
++
++static inline int tag_packet(struct sk_buff *skb)
++{
++	struct packet_tag pkt_id;
++	static unsigned int id;
++	unsigned char *temp_pkt;
++
++	pkt_id.eyeCatch = TAGGED;
++	pkt_id.reqid = ++id;
++
++	if (sizeof(struct packet_tag) <= skb_tailroom(skb)) {
++		temp_pkt = skb_put(skb, sizeof(pkt_id));
++		memcpy(temp_pkt, &pkt_id, sizeof(pkt_id));
++		pr_debug("%s:skb=%p reqid=%lu\n", __func__, skb, pkt_id.reqid);
++		return id;
++	}
++
++	if (net_ratelimit())
++		pr_debug("%s:Insufficient room to tag skb=%p\n", __func__, skb);
++
++	return 0;
++}
++
++static inline int report_packet(struct sk_buff *skb)
++{
++	struct packet_tag *pkt_id;
++	unsigned char *temp_pkt;
++
++	temp_pkt = (skb->data)+(skb->len) - sizeof(struct packet_tag);
++	pkt_id = (struct packet_tag *)temp_pkt;
++
++	if (pkt_id->eyeCatch == TAGGED) {
++		pr_debug("%s:skb=%p reqid=%lu\n", __func__, skb, pkt_id->reqid);
++		return pkt_id->reqid;
++	}
++
++	return 0;
++}
++
++#endif
++
++#define _TRACE_H_
++
++/* Tracepoint for OVS packets: traces packets travelling between kernel
++and userspace to compute RTT of a packet travelling in the slow path*/
++
++/* upcall_start is the trace event which is invoked after the packet has been
++tagged by tag_packet(). This newly tagged packet will exit kernel space
++and travel into user space to be assigned to a new flow.*/
++
++TRACE_EVENT(upcall_start,
++
++	TP_PROTO(struct sk_buff *skb, int id),
++
++	TP_ARGS(skb, id),
++
++	TP_STRUCT__entry(
++		__field(    const void *,     skbaddr     )
++		__field(    u16,     protocol     )
++		__field(    int,        id      )
++	),
++
++	TP_fast_assign(
++		__entry->skbaddr = skb;
++		__entry->protocol = ntohs(skb->protocol);
++		__entry->id = (const int) id;
++	),
++
++	TP_printk("skbaddr=%p proto=0x%04x id=%d\n",
++		  __entry->skbaddr, __entry->protocol, __entry->id)
++);
++
++/* define from upcall_start trace event a new event with the same proto,
++ and args instead named upcall_end */
++DEFINE_EVENT(upcall_start, upcall_end,
++	TP_PROTO(struct sk_buff *skb, int id),
++	TP_ARGS(skb, id)
++);
++
++#endif /*_TRACE_TRACE_H || TRACE_HEADER_MULTI_READ */
++
++/* our file is not located in include/trace/events - the default location*/
++#undef TRACE_INCLUDE_PATH
++#define TRACE_INCLUDE_PATH .
++#undef TRACE_INCLUDE_FILE
++#define TRACE_INCLUDE_FILE trace
++
++/* This part must be outside protection */
++#include <trace/define_trace.h>
+Binary files old/ovs/.git/index and ovs/.git/index differ
+diff -ruN old/ovs/.git/logs/HEAD ovs/.git/logs/HEAD
+--- old/ovs/.git/logs/HEAD	2016-06-25 14:13:34.765501894 -0400
++++ ovs/.git/logs/HEAD	2016-06-25 13:54:55.137524741 -0400
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466878414 -0400	clone: from https://github.com/openvswitch/ovs.git
++0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466877295 -0400	clone: from https://github.com/openvswitch/ovs.git
+diff -ruN old/ovs/.git/logs/refs/heads/master ovs/.git/logs/refs/heads/master
+--- old/ovs/.git/logs/refs/heads/master	2016-06-25 14:13:34.765501894 -0400
++++ ovs/.git/logs/refs/heads/master	2016-06-25 13:54:55.137524741 -0400
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466878414 -0400	clone: from https://github.com/openvswitch/ovs.git
++0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466877295 -0400	clone: from https://github.com/openvswitch/ovs.git
+diff -ruN old/ovs/.git/logs/refs/remotes/origin/HEAD ovs/.git/logs/refs/remotes/origin/HEAD
+--- old/ovs/.git/logs/refs/remotes/origin/HEAD	2016-06-25 14:13:34.765501894 -0400
++++ ovs/.git/logs/refs/remotes/origin/HEAD	2016-06-25 13:54:55.137524741 -0400
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466878414 -0400	clone: from https://github.com/openvswitch/ovs.git
++0000000000000000000000000000000000000000 676caaf73032475f2becf1879d72806623d39ba4 yves <yves@controller.(none)> 1466877295 -0400	clone: from https://github.com/openvswitch/ovs.git
